@@ -1,4 +1,4 @@
-// Rotary Encoder Sample app - IQ_rot.c 
+// Rotary Encoder Sample app - IQ_rot.c
 // Makes use of WIRINGPI Library
 // USES Raspberry Pi GPIO 23 and 24.
 // Adjusts ALSA volume (based on Left channel value) up or down to correspond with rotary encoder direction
@@ -31,14 +31,14 @@
 
 
 // Define DEBUG_PRINT TRUE for output
-#define DEBUG_PRINT 0		// 1 debug messages, 0 none
+#define DEBUG_PRINT 0      // 1 debug messages, 0 none
 
 // Define the Raspberry Pi IO Pins being used
-#define ENCODER_A 4		// GPIO 23
-#define ENCODER_B 5		// GPIO 24
+#define ENCODER_A 4      // GPIO 23
+#define ENCODER_B 5      // GPIO 24
 
-#define TRUE	1
-#define FALSE	0
+#define TRUE   1
+#define FALSE   0
 
 static volatile int encoderPos;
 static volatile int lastEncoded;
@@ -53,7 +53,7 @@ int main(int argc, char * argv[])
 {
    int pos = 125;
    long min, max;
-   long gpiodelay_value = 250;		// was 50
+   long gpiodelay_value = 250;      // was 50
 
    snd_mixer_t *handle;
    snd_mixer_selem_id_t *sid;
@@ -61,8 +61,8 @@ int main(int argc, char * argv[])
    const char *card = "default";
    // Previous linux driver's mixer name
    //   const char *selem_name = "Playback Digital";
-   //	const char *selem_name = "PCM";
-   const char *selem_name = "Digital";	// Linux 4.1.6-v7+ #810
+   //   const char *selem_name = "PCM";
+   const char *selem_name = "Digital";   // Linux 4.1.6-v7+ #810
    int x, mute_state;
    long i, currentVolume;
 
@@ -98,16 +98,29 @@ int main(int argc, char * argv[])
    // Get current volume
    if (x = snd_mixer_selem_get_playback_volume (elem, SND_MIXER_SCHN_FRONT_LEFT, &currentVolume))
    {
-        printf("%d %s\n", x, snd_strerror(x));
+		printf("%d %s\n", x, snd_strerror(x));
    }
    else if (DEBUG_PRINT) printf("Current ALSA volume LEFT: %ld\n", currentVolume);
 
    if (x = snd_mixer_selem_get_playback_volume (elem, SND_MIXER_SCHN_FRONT_RIGHT, &currentVolume))
    {
-        printf("%d %s\n", x, snd_strerror(x));
+		printf("%d %s\n", x, snd_strerror(x));
    }
    else if (DEBUG_PRINT) printf("Current ALSA volume RIGHT: %ld\n", currentVolume);
 
+//Get current volumio volume level
+   long volumio_vol = 0;
+   FILE *fp = popen("/volumio/app/plugins/system_controller/volumio_command_line_client/volumio.sh volume","r");
+   fscanf(fp, "%ld", &volumio_vol);
+   pclose(fp);
+   if( DEBUG_PRINT ) printf("Volumio volume: %ld\n\n", volumio_vol);
+
+   long sync_vol = 0; //This value will be calculated based on max volume value of ALSA
+
+   //Calculate volume level to synchronize
+   sync_vol = volumio_vol * ( max / 100);
+   snd_mixer_selem_set_playback_volume_all (elem, sync_vol);
+//--------------------
 
    /* monitor encoder level changes */
    wiringPiISR (ENCODER_A, INT_EDGE_BOTH, &encoderPulse);
@@ -117,49 +130,71 @@ int main(int argc, char * argv[])
    // Now sit and spin waiting for GPIO pins to go active...
    while (1)
    {
-      if (encoderPos != pos)
-      {
-              // get current volume
-	      if (x = snd_mixer_selem_get_playback_volume (elem, SND_MIXER_SCHN_FRONT_LEFT, &currentVolume))
-              {
-        		printf("%d %s\n", x, snd_strerror(x));
-              }
-	      else if (DEBUG_PRINT) printf(" Current ALSA volume: %ld\n", currentVolume);
+	  if (encoderPos != pos)
+	  {
+			  // get current volume
+		 if (x = snd_mixer_selem_get_playback_volume (elem, SND_MIXER_SCHN_FRONT_LEFT, &currentVolume))
+			  {
+			  printf("%d %s\n", x, snd_strerror(x));
+			  }
+		 else if (DEBUG_PRINT) printf(" Current ALSA volume: %ld\n", currentVolume);
 
-              // Adjust for MUTE
-	      if (currentVolume < min) 
-              {
-                        currentVolume = 0;
-			if (DEBUG_PRINT) printf(" Current ALSA volume set to min: %ld\n", currentVolume);
-              }
+			  // Adjust for MUTE
+         if (currentVolume < min)
+         {
+            currentVolume = 0;
+            if (DEBUG_PRINT) printf(" Current ALSA volume set to min: %ld\n", currentVolume);
+         }
 
-              // What way did the encoder go?
-	      if (encoderPos > pos)
-	      {
-		         pos = encoderPos;
-			 currentVolume = currentVolume + 10;
-			 // Adjust for MAX volume
-			 if (currentVolume > max) currentVolume = max;
-		         if (DEBUG_PRINT) printf("Volume UP %d - %ld", pos, currentVolume);
-	      }
-	      else if (encoderPos < pos)
-	      {
-		         pos = encoderPos;
-                         currentVolume = currentVolume - 10;
- 
-			 // Adjust for MUTE
-			 if (currentVolume < min) currentVolume = 0;
-		         if (DEBUG_PRINT) printf("Volume DOWN %d - %ld", pos, currentVolume);
-	      }
+			  // What way did the encoder go?
+         if (encoderPos > pos)
+         {
+            pos = encoderPos;
+            currentVolume = currentVolume + 10;
+            // Adjust for MAX volume
+            if (currentVolume > max) currentVolume = max;
+            if (DEBUG_PRINT) printf("Volume UP %d - %ld", pos, currentVolume);
+         }
+         else if (encoderPos < pos)
+         {
+            pos = encoderPos;
+            currentVolume = currentVolume - 10;
 
-              if (x = snd_mixer_selem_set_playback_volume_all(elem, currentVolume))
-              {
-                     printf(" ERROR %d %s\n", x, snd_strerror(x));
-              } else if (DEBUG_PRINT) printf(" Volume successfully set to %ld using ALSA!\n", currentVolume);
-	}
+            // Adjust for MUTE
+            if (currentVolume < min) currentVolume = 0;
+			   if (DEBUG_PRINT) printf("Volume DOWN %d - %ld", pos, currentVolume);
+         }
 
-	// Check x times per second, MAY NEED TO ADJUST THS FREQUENCY FOR SOME ENCODERS */
-	delay(gpiodelay_value); /* check pos x times per second */
+            if (x = snd_mixer_selem_set_playback_volume_all(elem, currentVolume))
+            {
+					 printf(" ERROR %d %s\n", x, snd_strerror(x));
+            } else if (DEBUG_PRINT){
+               printf(" Volume successfully set to %ld using ALSA!\n", currentVolume);
+            }
+
+				sync_vol = currentVolume * (100 / (float)max);
+				if(DEBUG_PRINT) printf("Sync volume: %ld\n", sync_vol);
+            
+            //Fork a new process to update volumio volume level
+            pid_t pID = vfork();
+               if(pID == 0){
+               if(DEBUG_PRINT) printf("Setting volumio volume to %ld\n\n", sync_vol);
+               char command[1000];
+               char res[1000];
+
+               //Build command to update volumio volume level
+               sprintf(command, "/volumio/app/plugins/system_controller/volumio_command_line_client/volumio.sh volume %ld", sync_vol);
+
+               //Execute command
+               FILE *fp = popen(command, "r");
+               fscanf(fp, "%s", &res);
+               pclose(fp);
+               _exit(0);
+            }
+   }
+
+   // Check x times per second, MAY NEED TO ADJUST THS FREQUENCY FOR SOME ENCODERS */
+   delay(gpiodelay_value); /* check pos x times per second */
    }
 
    // We never get here but should close the sockets etc. on exit.
@@ -185,24 +220,24 @@ void encoderPulse()
    B   |         |         |         |
        |         |         |         |
    ----+         +---------+         +---------+  1
-
    */
 
-	if (inCriticalSection==TRUE) return;
+   if (inCriticalSection==TRUE) return;
 
-	inCriticalSection = TRUE;
+   inCriticalSection = TRUE;
 
-	int MSB = digitalRead(ENCODER_A);
-        int LSB = digitalRead(ENCODER_B);
+   int MSB = digitalRead(ENCODER_A);
+		int LSB = digitalRead(ENCODER_B);
 
-        int encoded = (MSB << 1) | LSB;
-        int sum = (lastEncoded << 2) | encoded;
+		int encoded = (MSB << 1) | LSB;
+		int sum = (lastEncoded << 2) | encoded;
 
-        if(sum == 0b1101 || sum == 0b0100 || sum == 0b0010 || sum == 0b1011) encoderPos++;
-	else if(sum == 0b1110 || sum == 0b0111 || sum == 0b0001 || sum == 0b1000) encoderPos--;
+		if(sum == 0b1101 || sum == 0b0100 || sum == 0b0010 || sum == 0b1011) encoderPos++;
+   else if(sum == 0b1110 || sum == 0b0111 || sum == 0b0001 || sum == 0b1000) encoderPos--;
 
-        lastEncoded = encoded;
+		lastEncoded = encoded;
 
-	inCriticalSection = FALSE;
+   inCriticalSection = FALSE;
 }
+
 
